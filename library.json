@@ -1,0 +1,63 @@
+{
+  "name": "EspNow_UniVar",
+  "version": "1.1.0",
+  "description": "ESP-NOW mono-variable : un paquet = une variable, trame auto-descriptive (magic/ver/type/unité/longueur/CRC-16) avec horodatage UTC et numéro de séquence. Remplace les deux structs monolithiques du parc (EspNowEchange 40 o et struct_message_iOT_espnow ~90 o) qui se rejetaient mutuellement. Header-only, zéro allocation dynamique.",
+  "keywords": [
+    "esp-now",
+    "espnow",
+    "télémétrie",
+    "iot",
+    "unicast",
+    "broadcast",
+    "crc16",
+    "auto-descriptif"
+  ],
+  "authors": [
+    {
+      "name": "Olivier FOURNET",
+      "email": "olivier.fournet@free.fr",
+      "url": "https://github.com/Fo170",
+      "maintainer": true
+    }
+  ],
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Fo170/EspNow_UniVar.git"
+  },
+  "homepage": "https://github.com/Fo170/EspNow_UniVar",
+  "frameworks": "arduino",
+  "platforms": [
+    "espressif8266",
+    "espressif32"
+  ],
+  "headers": "EspNow_UniVar.h",
+  "dependencies": {
+    "Unity_Dictionary": "https://github.com/Fo170/Unity_Dictionary.git#v1.2.0"
+  },
+  "build": {
+    "srcDir": "src"
+  },
+  "examples": [
+    {
+      "name": "Emetteur — publier des variables",
+      "base": "examples/Emetteur",
+      "files": ["examples/Emetteur/Emetteur.ino"]
+    },
+    {
+      "name": "Recepteur — écouter des variables",
+      "base": "examples/Recepteur",
+      "files": ["examples/Recepteur/Recepteur.ino"]
+    }
+  ],
+  "export": {
+    "exclude": [
+      ".github",
+      "docs",
+      "test",
+      "*.md",
+      "*.yml",
+      "*.txt"
+    ]
+  }
+}
