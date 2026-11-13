@@ -88,7 +88,7 @@ parc entièrement métropolitain.
 
 ```ini
 lib_deps =
-    https://github.com/Fo170/EspNow_UniVar.git@^2.0.0
+    https://github.com/Fo170/EspNow_UniVar.git@^2.1.0
     https://github.com/Fo170/Unity_Dictionary.git@^1.2.0
 ```
 
@@ -164,6 +164,27 @@ if (env.lire(ID_IOT_CAPTEUR, VAR_ENERGIE, p, &age) && age < 3000) {
 **Pas de file d'attente** : la valeur la plus récente gagne. 10 nœuds × 5
 variables × 1 Hz = 50 paquets/s ; une file de 8 déborde en 160 ms — une table de
 slots ne déborde jamais.
+
+### Temps réel sans buffer, mais sans lecture partielle
+
+La réception écrit **directement** dans le slot de la variable locale, avec son
+horodatage (`rx_ms`). C'est ce qui rend le buffer inutile : il n'y a rien à
+mettre en file, la dernière valeur remplace l'avant-dernière.
+
+Mais le callback de réception s'exécute dans la **tâche WiFi**, pendant que
+l'application lit dans `loop()` — deux cœurs sur ESP32, préemption sur ESP8266.
+Un `memcpy` de `double` (8 o) ou de chaîne (24 o) n'est donc **pas atomique**.
+
+Un **seqlock** par slot garantit qu'une lecture ne renvoie jamais une valeur
+partielle : compteur impair pendant l'écriture, pair quand elle est stable, le
+lecteur recommence si le compteur a bougé.
+
+| | |
+|---|---|
+| File d'attente | aucune |
+| Verrou bloquant | aucun (pas d'inversion de priorité avec la tâche WiFi) |
+| Coût mémoire | 0 octet — le compteur tient dans le remplissage du slot |
+| Signal d'anomalie | `stats().lecture_conflit` — doit rester à 0 |
 
 ---
 
@@ -323,11 +344,11 @@ Aucune carte, aucun flash — la logique de trame est testée sur l'ordinateur :
 ./test/host/run.sh
 ```
 
-12 exigences, 158 vérifications : aller-retour de chaque type, CRC (1 bit
+**13 exigences, 172 vérifications** : aller-retour de chaque type, CRC (1 bit
 corrompu rejeté), incohérence `len`/`type`, refus de `len > 229`, `magic`/`ver`,
 paire non surveillée, `age_ms` exact (dont débordement de `millis()`), trous de
 séquence, plafond d'émission, périodes indépendantes, chaînes sans NUL, trame de
-250 o.
+250 o, et **seqlock** : une lecture pendant une écriture ne renvoie rien.
 
 ---
 

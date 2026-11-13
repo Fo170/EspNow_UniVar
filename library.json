@@ -1,6 +1,6 @@
 {
   "name": "EspNow_UniVar",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "ESP-NOW mono-variable, agnostique (aucun identifiant métier) : un paquet = une variable, trame auto-descriptive (magic/ver/type/unité/longueur/CRC-16) avec horodatage UTC et numéro de séquence. Remplace les deux structs monolithiques du parc (EspNowEchange 40 o et struct_message_iOT_espnow ~90 o) qui se rejetaient mutuellement. Header-only, zéro allocation dynamique.",
   "keywords": [
     "esp-now",

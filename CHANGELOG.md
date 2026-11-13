@@ -3,6 +3,47 @@
 Toutes les dates sont au format AAAA-MM-JJ.
 Le versionnage suit [SemVer](https://semver.org/lang/fr/).
 
+## [2.1.0] - 2026-11-13
+
+### 🐛 Corrigé — lectures cohérentes sans buffer ni verrou
+
+**Le défaut.** Le callback de réception (tâche WiFi) écrit dans le slot pendant
+que l'application le lit dans `loop()`. Sur ESP32 ils sont sur **deux cœurs** ;
+sur ESP8266 la tâche WiFi **préempte** `loop()`. Deux conséquences :
+
+1. `valide = true` était posé **avant** la copie de la valeur → un lecteur
+   pouvait voir un slot marqué valide avec l'**ancienne** valeur ;
+2. un `double` (8 o) ou une chaîne (jusqu'à 24 o) pouvait être lu **à moitié
+   écrit** — un `memcpy` de 8 octets n'est pas atomique sur un MCU 32 bits.
+
+**La correction.** Un **seqlock** par slot : compteur impair pendant l'écriture,
+pair quand la valeur est stable. Le lecteur recommence si le compteur a bougé.
+
+| | |
+|---|---|
+| File d'attente | **aucune** — le principe « pas de buffer » est conservé |
+| Verrou bloquant | **aucun** — pas de risque d'inverser la priorité avec la tâche WiFi |
+| Coût mémoire | **0 octet** : le compteur tient dans le remplissage existant du slot (60 o inchangé) |
+| Coût CPU | 2 incréments par réception, une relecture occasionnelle |
+
+`valide` est désormais posé **en dernier**.
+
+### ✨ Ajouté
+
+- `UniVarStats::lecture_conflit` — nombre de lectures abandonnées faute de
+  stabilité. Un compteur non nul signale une contention anormale : c'est un
+  diagnostic, pas un fonctionnement normal.
+- `EspNowUniVar::slotPourTest()` (sous `UVAR_HOST_TEST`) — permet de simuler une
+  écriture concurrente dans la recette.
+
+### Recette
+
+**13 exigences, 172 vérifications** (contre 12 / 158). Le nouveau test 13 prouve
+qu'une lecture pendant une écriture ne renvoie **rien** : ni valeur partielle,
+ni valeur périmée marquée valide.
+
+---
+
 ## [2.0.0] - 2026-11-13
 
 ### 💥 Rupture — la librairie devient agnostique

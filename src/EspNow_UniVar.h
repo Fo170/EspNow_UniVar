@@ -22,13 +22,13 @@
 //      par lecture octet par octet (alignement de double non garanti)
 //
 //  Auteur  : FOURNET Olivier (GPL-3.0)
-//  Version : 2.0.0
+//  Version : 2.1.0
 // ============================================================================
 #ifndef ESPNOW_UNIVAR_H
 #define ESPNOW_UNIVAR_H
 
 // Version de la librairie (source UNIQUE — agrégée par liste_lib.h)
-#define __ESPNOW_UNIVAR_H_VERSION__ "2.0.0"
+#define __ESPNOW_UNIVAR_H_VERSION__ "2.1.0"
 
 #include <Arduino.h>
 #include <stdint.h>
@@ -314,6 +314,10 @@ struct UniVarSlot {
   uint32_t rx_ms;
   uint32_t perdus;
   uint16_t seq;
+  // Seqlock : impair = écriture en cours, pair = valeur stable.
+  // Tient dans le remplissage existant : sizeof(UniVarSlot) reste 60 o.
+  // Un SEUL écrivain (la tâche WiFi) → l'incrément n'a pas besoin d'être atomique.
+  uint16_t seq_ecriture;
 };
 
 // ============================================================================
@@ -347,6 +351,7 @@ struct UniVarStats {
   uint32_t ancien_format;
   uint32_t non_surveille;
   uint32_t perdus;          // somme des trous de séquence sur les slots surveillés
+  uint32_t lecture_conflit; // lectures ayant échoué faute de stabilité (seqlock)
 };
 
 // ============================================================================
@@ -462,13 +467,27 @@ public:
   bool lire(uint8_t id_iot, uint16_t id_var, T& v, uint32_t* age_ms = nullptr)
   {
     const int i = _trouverSlot(id_iot, id_var);
-    if (i < 0 || !_slots[i].valide) return false;
-    if (_slots[i].type != uvarTypeDe<T>()) return false;
+    if (i < 0) return false;
+    UniVarSlot& s = _slots[i];
 
-    const UniVarSlot& s = _slots[i];
-    memcpy(&v, s.val, sizeof(T));
-    if (age_ms) *age_ms = (uint32_t)(millis() - s.rx_ms);
-    return true;
+    // Seqlock : on relit si la valeur a bougé pendant la copie. Pas de verrou,
+    // donc aucun risque d'inverser la priorité avec la tâche WiFi.
+    for (uint8_t essai = 0; essai < 4; essai++) {
+      const uint16_t v1 = s.seq_ecriture;
+      if (v1 & 1u) continue;                 // écriture en cours
+      const bool    valide = s.valide;
+      const uint8_t type   = s.type;
+      const uint32_t rx    = s.rx_ms;
+      memcpy(&v, s.val, sizeof(T));
+      if (s.seq_ecriture != v1) continue;    // a bougé : on recommence
+
+      if (!valide) return false;
+      if (type != uvarTypeDe<T>()) return false;
+      if (age_ms) *age_ms = (uint32_t)(millis() - rx);
+      return true;
+    }
+    _stats.lecture_conflit++;
+    return false;
   }
 
   // Lecture d'une chaîne (toujours terminée par NUL).
@@ -477,17 +496,29 @@ public:
   {
     if (dst == nullptr || taille == 0) return false;
     const int i = _trouverSlot(id_iot, id_var);
-    if (i < 0 || !_slots[i].valide) return false;
-    if (_slots[i].type != UVAR_STRING) return false;
+    if (i < 0) return false;
+    UniVarSlot& s = _slots[i];
 
-    const UniVarSlot& s = _slots[i];
-    size_t n = s.len;
-    if (n > taille - 1) n = taille - 1;
-    if (n > UVAR_MAX_STRLEN - 1) n = UVAR_MAX_STRLEN - 1;
-    memcpy(dst, s.texte, n);
-    dst[n] = '\0';
-    if (age_ms) *age_ms = (uint32_t)(millis() - s.rx_ms);
-    return true;
+    for (uint8_t essai = 0; essai < 4; essai++) {
+      const uint16_t v1 = s.seq_ecriture;
+      if (v1 & 1u) continue;
+      const bool    valide = s.valide;
+      const uint8_t type   = s.type;
+      const uint8_t len    = s.len;
+      const uint32_t rx    = s.rx_ms;
+      size_t n = len;
+      if (n > taille - 1) n = taille - 1;
+      if (n > UVAR_MAX_STRLEN - 1) n = UVAR_MAX_STRLEN - 1;
+      memcpy(dst, s.texte, n);
+      dst[n] = '\0';
+      if (s.seq_ecriture != v1) continue;
+
+      if (!valide || type != UVAR_STRING) return false;
+      if (age_ms) *age_ms = (uint32_t)(millis() - rx);
+      return true;
+    }
+    _stats.lecture_conflit++;
+    return false;
   }
 
   // Métadonnées d'un slot, sans lire la valeur.
@@ -495,13 +526,26 @@ public:
              uint32_t* age_ms = nullptr, uint32_t* perdus = nullptr)
   {
     const int i = _trouverSlot(id_iot, id_var);
-    if (i < 0 || !_slots[i].valide) return false;
-    const UniVarSlot& s = _slots[i];
-    if (type)   *type   = s.type;
-    if (unit)   *unit   = s.unit;
-    if (age_ms) *age_ms = (uint32_t)(millis() - s.rx_ms);
-    if (perdus) *perdus = s.perdus;
-    return true;
+    if (i < 0) return false;
+    UniVarSlot& s = _slots[i];
+
+    for (uint8_t essai = 0; essai < 4; essai++) {
+      const uint16_t v1 = s.seq_ecriture;
+      if (v1 & 1u) continue;
+      const bool    valide = s.valide;
+      const uint8_t t_ = s.type, u_ = s.unit;
+      const uint32_t rx_ = s.rx_ms, p_ = s.perdus;
+      if (s.seq_ecriture != v1) continue;
+
+      if (!valide) return false;
+      if (type)   *type   = t_;
+      if (unit)   *unit   = u_;
+      if (age_ms) *age_ms = (uint32_t)(millis() - rx_);
+      if (perdus) *perdus = p_;
+      return true;
+    }
+    _stats.lecture_conflit++;
+    return false;
   }
 
   // --------------------------------------------------------------------------
@@ -516,6 +560,14 @@ public:
   {
     if (len) *len = _derniereLen;
     return _derniereTrame;
+  }
+
+  // Accès au slot brut : permet de simuler une écriture concurrente et de
+  // vérifier que lire() ne renvoie JAMAIS une valeur partielle.
+  UniVarSlot* slotPourTest(uint8_t id_iot, uint16_t id_var)
+  {
+    const int i = _trouverSlot(id_iot, id_var);
+    return (i < 0) ? nullptr : &_slots[i];
   }
 #endif
 
@@ -564,6 +616,11 @@ public:
       }
     }
 
+    // ── Seqlock : impair pendant l'écriture, pair quand la valeur est stable ──
+    // `valide` est posé EN DERNIER : un lecteur ne peut pas voir un slot marqué
+    // valide alors que la valeur n'est pas encore copiée.
+    s.seq_ecriture++;
+
     s.type   = vue.type;
     s.unit   = vue.unit;
     s.len    = vue.len;
@@ -571,7 +628,6 @@ public:
     s.t_fct  = vue.t_fct;
     s.seq    = vue.seq;
     s.rx_ms  = millis();
-    s.valide = true;
     _stats.recus++;
 
     if (vue.type == UVAR_STRING) {
@@ -584,6 +640,9 @@ public:
       memset(s.val, 0, sizeof(s.val));
       memcpy(s.val, vue.valeur, n);
     }
+
+    s.valide = true;
+    s.seq_ecriture++;
   }
 
   // --------------------------------------------------------------------------

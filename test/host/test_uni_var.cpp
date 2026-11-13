@@ -430,6 +430,52 @@ int main()
   }
 
   // --------------------------------------------------------------------------
+  titre("13. seqlock : aucune lecture partielle pendant une ecriture");
+  {
+    EspNowUniVar env;
+    env.surveiller(IOT_A, VAR_P);
+
+    float f = 1234.5f;
+    uint8_t buf[UVAR_TRAME_MAX];
+    uint8_t n = uvarEncode(buf, IOT_A, VAR_P, UVAR_FLOAT32, _Unit_Watt_, &f, 4, 0, 0, 1);
+    env._traiterTrame(buf, n);
+
+    float lu = 0.0f; uint32_t age;
+    VERIF(env.lire(IOT_A, VAR_P, lu, &age) == true);
+    VERIF(lu == f);
+
+    UniVarSlot* s = env.slotPourTest(IOT_A, VAR_P);
+    VERIF(s != nullptr);
+    VERIF((s->seq_ecriture & 1u) == 0);       // stable apres reception
+
+    // Simule une ecriture EN COURS : compteur impair.
+    s->seq_ecriture = 1;
+    const uint32_t conflits_avant = env.stats().lecture_conflit;
+    lu = -1.0f;
+    VERIF(env.lire(IOT_A, VAR_P, lu, &age) == false);
+    VERIF(lu == -1.0f);                       // la valeur n'a PAS ete touchee
+    VERIF(env.stats().lecture_conflit == conflits_avant + 1);
+
+    // Une chaine en cours d'ecriture ne doit pas etre lue non plus
+    char tampon[32];
+    VERIF(env.lireTexte(IOT_A, VAR_P, tampon, sizeof(tampon)) == false);
+
+    // Fin d'ecriture : la lecture redevient possible
+    s->seq_ecriture = 2;
+    VERIF(env.lire(IOT_A, VAR_P, lu, &age) == true);
+    VERIF(lu == f);
+
+    // infos() suit la meme regle
+    s->seq_ecriture = 3;
+    uint8_t ty = 0, un = 0;
+    VERIF(env.infos(IOT_A, VAR_P, &ty, &un) == false);
+    s->seq_ecriture = 4;
+    VERIF(env.infos(IOT_A, VAR_P, &ty, &un) == true);
+    VERIF(ty == UVAR_FLOAT32);
+    VERIF(un == _Unit_Watt_);
+  }
+
+  // --------------------------------------------------------------------------
   printf("\n%d verifications OK, %d echec(s)\n", g_ok, g_ko);
   if (g_ko == 0) printf("RESULTAT : OK\n");
   else           printf("RESULTAT : ECHEC\n");

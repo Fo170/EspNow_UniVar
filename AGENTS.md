@@ -5,7 +5,7 @@ Instructions pour les agents IA travaillant sur ce dépôt.
 ## Informations générales
 
 - **Nom de la librairie** : EspNow_UniVar
-- **Version** : 2.0.0
+- **Version** : 2.1.0
 - **Compte GitHub** : https://github.com/Fo170/
 - **Auteur** : Olivier FOURNET
 - **Email** : olivier.fournet@free.fr
@@ -71,6 +71,27 @@ compilé — c'est arrivé en v1.1.0, corrigé en v1.1.1.
    collisions qui écraseraient une variable par une autre.
 6. **Le format ne change pas sans changer `UVAR_VER`.** La taille, l'ordre et la
    sémantique des champs sont un contrat inter-appareils.
+
+## Concurrence — à ne jamais casser
+
+Le callback de réception s'exécute dans la **tâche WiFi**, pas dans `loop()`.
+Sur ESP32 ce sont deux cœurs ; sur ESP8266 la tâche WiFi préempte `loop()`.
+
+**Toute écriture de slot doit être encadrée par le seqlock** :
+
+```cpp
+s.seq_ecriture++;      // impair : écriture en cours
+// ... écrire tous les champs, y compris la valeur ...
+s.valide = true;       // EN DERNIER
+s.seq_ecriture++;      // pair : valeur stable
+```
+
+Et toute lecture doit relire si `seq_ecriture` a changé pendant la copie.
+Ne jamais lire `valide` puis la valeur sans cette protection : c'est le bug
+corrigé en 2.1.0 (`valide` était posé avant la copie).
+
+Aucune file d'attente, aucun verrou bloquant : le seqlock est sans attente et
+ne peut pas inverser la priorité avec la tâche WiFi.
 
 ## `EspNow_UniVar_Vars.h` — APPEND-ONLY
 
