@@ -3,6 +3,49 @@
 Toutes les dates sont au format AAAA-MM-JJ.
 Le versionnage suit [SemVer](https://semver.org/lang/fr/).
 
+## [2.0.0] - 2026-11-13
+
+### 💥 Rupture — la librairie devient agnostique
+
+`src/EspNow_UniVar_Vars.h` est **retiré de la librairie**. Il contenait les
+identifiants d'un parc précis (PZEM, Linky, radiateurs, zones de chauffage) :
+ce sont des spécificités d'application, pas de la mécanique de transport.
+
+La librairie ne connaît plus que les **règles du protocole** :
+
+| Constante | Rôle |
+|---|---|
+| `UVAR_ID_IOT_INVALIDE` (0) | `id_iot` non identifié → trame refusée |
+| `UVAR_ID_VAR_INVALIDE` (0) | `id_var` non déclarée → trame refusée |
+
+Tout le reste — valeurs de `id_iot`, valeurs de `id_var`, unité par variable —
+appartient à l'application, dans **son** fichier de contrat.
+
+### ✏️ Modifié
+
+- `examples/Emetteur` et `examples/Recepteur` définissent leur propre bloc de
+  contrat, commenté, avec les trois règles à respecter (0 réservé, append-only,
+  une unité par variable).
+- `test/host/test_uni_var.cpp` idem : plus aucune référence à un parc réel.
+
+### Migration depuis 1.1.x
+
+```diff
+- #include <EspNow_UniVar.h>        // fournissait aussi les identifiants
++ #include <EspNow_UniVar.h>
++ #include "mon_contrat.h"           // vos id_iot / id_var, chez vous
+```
+
+Si vous utilisiez `UVAR_IOT_INDEFINI`, remplacez-le par `UVAR_ID_IOT_INVALIDE`
+(même valeur, 0, mais désormais définie par le protocole et non par un parc).
+
+### Non fonctionnel
+
+Inchangé : trame `21 + len`, CRC-16/CCITT-FALSE, zéro allocation dynamique,
+ESP8266 + ESP32 (IDF 4.x et 5.x). Recette : 158 vérifications, 0 échec.
+
+---
+
 ## [1.1.1] - 2026-11-13
 
 ### 🐛 Corrigé

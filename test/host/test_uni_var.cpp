@@ -15,6 +15,24 @@
 
 #include <EspNow_UniVar.h>
 
+// ----------------------------------------------------------------------------
+//  CONTRAT LOCAL du test — la librairie est agnostique, elle ne fournit aucun
+//  identifiant. On reproduit ici ce qu'un projet ferait dans son propre
+//  fichier de contrat (append-only, 0 réservé par le protocole).
+// ----------------------------------------------------------------------------
+#define IOT_A               1    // émetteur principal
+#define IOT_B               2    // second émetteur
+#define IOT_C               3    // troisième émetteur
+#define IOT_D               4    // quatrième émetteur
+
+#define VAR_P               1    // W      (et VAR_P+1.. pour le test du plafond)
+#define VAR_WH              2    // Wh
+#define VAR_I               3    // A
+#define VAR_S               4    // VA
+#define VAR_PF              5    // PF
+#define VAR_PAPP            6    // VA
+#define VAR_NOM             7    // chaîne
+
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -35,8 +53,8 @@ static const char* g_test = "";
 
 static void titre(const char* t) { g_test = t; printf("- %s\n", t); }
 
-static uint8_t trameFloat(uint8_t* buf, float v, uint16_t id_var = UVAR_PZEM_S_APPARENTE,
-                          uint8_t id_iot = UVAR_IOT_PZEM004T, uint16_t seq = 1)
+static uint8_t trameFloat(uint8_t* buf, float v, uint16_t id_var = VAR_S,
+                          uint8_t id_iot = IOT_A, uint16_t seq = 1)
 {
   return uvarEncode(buf, id_iot, id_var, UVAR_FLOAT32, _Unit_VA_, &v, 4, 1234, 1700000000UL, seq);
 }
@@ -67,7 +85,7 @@ int main()
 
     for (const Cas& c : cas) {
       uint8_t buf[UVAR_TRAME_MAX];
-      const uint8_t n = uvarEncode(buf, UVAR_IOT_PZEM004T, UVAR_PZEM_P_ACTIVE, c.type,
+      const uint8_t n = uvarEncode(buf, IOT_A, VAR_P, c.type,
                                    _Unit_VA_, c.p, c.len, 42, 1700000123UL, 7);
       VERIF(n == (uint8_t)(UVAR_SURCOUT + c.len));
 
@@ -75,8 +93,8 @@ int main()
       VERIF(uvarDecode(buf, n, v) == UVAR_OK);
       VERIF(v.type == c.type);
       VERIF(v.len == c.len);
-      VERIF(v.id_iot == UVAR_IOT_PZEM004T);
-      VERIF(v.id_var == UVAR_PZEM_P_ACTIVE);
+      VERIF(v.id_iot == IOT_A);
+      VERIF(v.id_var == VAR_P);
       VERIF(v.unit == _Unit_VA_);
       VERIF(v.t_fct == 42);
       VERIF(v.epoch == 1700000123UL);
@@ -121,14 +139,14 @@ int main()
     uint8_t buf[UVAR_TRAME_MAX];
     double d = 1.5;
     // type FLOAT32 annoncé mais 8 octets de valeur
-    const uint8_t n = uvarEncode(buf, UVAR_IOT_PZEM004T, UVAR_PZEM_P_ACTIVE,
+    const uint8_t n = uvarEncode(buf, IOT_A, VAR_P,
                                  UVAR_FLOAT32, _Unit_VA_, &d, 8, 0, 0, 1);
     VERIF(n == 29);
     UniVarVue v;
     VERIF(uvarDecode(buf, n, v) == UVAR_TYPE_KO);
 
     // type inconnu (99)
-    const uint8_t n2 = uvarEncode(buf, UVAR_IOT_PZEM004T, UVAR_PZEM_P_ACTIVE,
+    const uint8_t n2 = uvarEncode(buf, IOT_A, VAR_P,
                                   99, _Unit_VA_, &d, 4, 0, 0, 1);
     VERIF(uvarDecode(buf, n2, v) == UVAR_TYPE_KO);
   }
@@ -140,16 +158,16 @@ int main()
     uint8_t grosse[300];
     memset(grosse, 'A', sizeof(grosse));
 
-    VERIF(uvarEncode(buf, UVAR_IOT_PZEM004T, UVAR_NOM, UVAR_STRING, _Unit_Aucune_,
+    VERIF(uvarEncode(buf, IOT_A, VAR_NOM, UVAR_STRING, _Unit_Aucune_,
                      grosse, UVAR_LEN_MAX, 0, 0, 1) == (uint8_t)(UVAR_SURCOUT + UVAR_LEN_MAX));
-    VERIF(uvarEncode(buf, UVAR_IOT_PZEM004T, UVAR_NOM, UVAR_STRING, _Unit_Aucune_,
+    VERIF(uvarEncode(buf, IOT_A, VAR_NOM, UVAR_STRING, _Unit_Aucune_,
                      grosse, (uint8_t)(UVAR_LEN_MAX + 1), 0, 0, 1) == 0);
-    VERIF(uvarEncode(buf, UVAR_IOT_PZEM004T, UVAR_NOM, UVAR_STRING, _Unit_Aucune_,
+    VERIF(uvarEncode(buf, IOT_A, VAR_NOM, UVAR_STRING, _Unit_Aucune_,
                      grosse, 0, 0, 0, 1) == 0);
     // id_iot non defini / id_var nul : refuses
-    VERIF(uvarEncode(buf, UVAR_IOT_INDEFINI, UVAR_NOM, UVAR_STRING, _Unit_Aucune_,
+    VERIF(uvarEncode(buf, UVAR_ID_IOT_INVALIDE, VAR_NOM, UVAR_STRING, _Unit_Aucune_,
                      grosse, 4, 0, 0, 1) == 0);
-    VERIF(uvarEncode(buf, UVAR_IOT_PZEM004T, 0, UVAR_STRING, _Unit_Aucune_,
+    VERIF(uvarEncode(buf, IOT_A, 0, UVAR_STRING, _Unit_Aucune_,
                      grosse, 4, 0, 0, 1) == 0);
   }
 
@@ -192,55 +210,55 @@ int main()
     VERIF(env.stats().recus == 0);
 
     float lu; uint32_t age;
-    VERIF(env.lire(UVAR_IOT_PZEM004T, UVAR_PZEM_S_APPARENTE, lu, &age) == false);
+    VERIF(env.lire(IOT_A, VAR_S, lu, &age) == false);
 
     // surveillee mais jamais recue
-    VERIF(env.surveiller(UVAR_IOT_PZEM004T, UVAR_PZEM_S_APPARENTE) == true);
-    VERIF(env.lire(UVAR_IOT_PZEM004T, UVAR_PZEM_S_APPARENTE, lu, &age) == false);
+    VERIF(env.surveiller(IOT_A, VAR_S) == true);
+    VERIF(env.lire(IOT_A, VAR_S, lu, &age) == false);
 
     // surveillee et recue
     env._traiterTrame(buf, n);
     VERIF(env.stats().recus == 1);
-    VERIF(env.lire(UVAR_IOT_PZEM004T, UVAR_PZEM_S_APPARENTE, lu, &age) == true);
+    VERIF(env.lire(IOT_A, VAR_S, lu, &age) == true);
     VERIF(lu == f);
 
     // mauvais type demande : refus explicite, pas de reinterpretation
     uint32_t mauvais;
-    VERIF(env.lire(UVAR_IOT_PZEM004T, UVAR_PZEM_S_APPARENTE, mauvais, &age) == false);
+    VERIF(env.lire(IOT_A, VAR_S, mauvais, &age) == false);
 
     // table pleine : surveiller() echoue franchement
     for (int k = 0; k < UVAR_MAX_SLOTS + 4; k++)
       env.surveiller((uint8_t)(20 + k), (uint16_t)(500 + k));
-    VERIF(env.surveiller(UVAR_IOT_DATALOG, 999) == false);
+    VERIF(env.surveiller(IOT_D, 999) == false);
   }
 
   // --------------------------------------------------------------------------
   titre("7. age_ms exact");
   {
     EspNowUniVar env;
-    env.surveiller(UVAR_IOT_LINKYSTIC, UVAR_LINKY_P_APP);
+    env.surveiller(IOT_B, VAR_PAPP);
 
     float f = 250.0f;
     uint8_t buf[UVAR_TRAME_MAX];
-    const uint8_t n = uvarEncode(buf, UVAR_IOT_LINKYSTIC, UVAR_LINKY_P_APP,
+    const uint8_t n = uvarEncode(buf, IOT_B, VAR_PAPP,
                                  UVAR_FLOAT32, _Unit_VA_, &f, 4, 10, 0, 1);
 
     g_millis = 5000;
     env._traiterTrame(buf, n);
 
     float lu; uint32_t age = 0;
-    VERIF(env.lire(UVAR_IOT_LINKYSTIC, UVAR_LINKY_P_APP, lu, &age) == true);
+    VERIF(env.lire(IOT_B, VAR_PAPP, lu, &age) == true);
     VERIF(age == 0);
 
     g_millis = 5000 + 2750;
-    VERIF(env.lire(UVAR_IOT_LINKYSTIC, UVAR_LINKY_P_APP, lu, &age) == true);
+    VERIF(env.lire(IOT_B, VAR_PAPP, lu, &age) == true);
     VERIF(age == 2750);
 
     // robustesse au debordement de millis()
     g_millis = 0xFFFFFF00UL;
     env._traiterTrame(buf, n);
     g_millis = 0x00000100UL;   // 512 ms plus tard, apres wrap
-    VERIF(env.lire(UVAR_IOT_LINKYSTIC, UVAR_LINKY_P_APP, lu, &age) == true);
+    VERIF(env.lire(IOT_B, VAR_PAPP, lu, &age) == true);
     VERIF(age == 512);
   }
 
@@ -248,31 +266,31 @@ int main()
   titre("8. saut de seq de 3 -> perdus += 3");
   {
     EspNowUniVar env;
-    env.surveiller(UVAR_IOT_PZEM004T, UVAR_PZEM_P_ACTIVE);
+    env.surveiller(IOT_A, VAR_P);
 
     float f = 1.0f;
     uint8_t buf[UVAR_TRAME_MAX];
 
     // seq 10 : premiere trame, aucun trou possible
-    uint8_t n = uvarEncode(buf, UVAR_IOT_PZEM004T, UVAR_PZEM_P_ACTIVE,
+    uint8_t n = uvarEncode(buf, IOT_A, VAR_P,
                            UVAR_FLOAT32, _Unit_Watt_, &f, 4, 0, 0, 10);
     env._traiterTrame(buf, n);
     VERIF(env.stats().perdus == 0);
 
     // seq 11 : consecutive
-    n = uvarEncode(buf, UVAR_IOT_PZEM004T, UVAR_PZEM_P_ACTIVE,
+    n = uvarEncode(buf, IOT_A, VAR_P,
                    UVAR_FLOAT32, _Unit_Watt_, &f, 4, 0, 0, 11);
     env._traiterTrame(buf, n);
     VERIF(env.stats().perdus == 0);
 
     // seq 15 : attendu 12 -> 3 perdus
-    n = uvarEncode(buf, UVAR_IOT_PZEM004T, UVAR_PZEM_P_ACTIVE,
+    n = uvarEncode(buf, IOT_A, VAR_P,
                    UVAR_FLOAT32, _Unit_Watt_, &f, 4, 0, 0, 15);
     env._traiterTrame(buf, n);
     VERIF(env.stats().perdus == 3);
 
     uint32_t perdus_slot = 0; uint32_t age = 0; uint8_t type = 0xFF, unit = 0xFF;
-    VERIF(env.infos(UVAR_IOT_PZEM004T, UVAR_PZEM_P_ACTIVE, &type, &unit, &age, &perdus_slot));
+    VERIF(env.infos(IOT_A, VAR_P, &type, &unit, &age, &perdus_slot));
     VERIF(perdus_slot == 3);
     VERIF(type == UVAR_FLOAT32);
     VERIF(unit == _Unit_Watt_);
@@ -284,14 +302,14 @@ int main()
     // millis() est monotone : on part d'une base, on ne revient jamais en arriere.
     g_millis = 100000;
     EspNowUniVar env;
-    VERIF(env.begin(UVAR_IOT_PZEM004T) == false);   // aucune radio sur l'hote
-    VERIF(env.idIot() == UVAR_IOT_PZEM004T);        // l'identite est posee quand meme
+    VERIF(env.begin(IOT_A) == false);   // aucune radio sur l'hote
+    VERIF(env.idIot() == IOT_A);        // l'identite est posee quand meme
 
     // UVAR_MAX_PUB variables dues d'un coup : le plafond doit en refuser.
     float v[UVAR_MAX_PUB];
     for (int k = 0; k < UVAR_MAX_PUB; k++) {
       v[k] = (float)k;
-      VERIF(env.publier((uint16_t)(UVAR_PZEM_P_ACTIVE + k), &v[k], _Unit_Watt_, 100));
+      VERIF(env.publier((uint16_t)(VAR_P + k), &v[k], _Unit_Watt_, 100));
     }
 
     env.poll();
@@ -308,15 +326,15 @@ int main()
   {
     g_millis = 200000;
     EspNowUniVar env;
-    env.begin(UVAR_IOT_PZEM004T);                // radio absente : identite seule
+    env.begin(IOT_A);                // radio absente : identite seule
     float rapide = 10.0f, lent = 20.0f;
 
-    VERIF(env.publier(UVAR_PZEM_P_ACTIVE,  &rapide, _Unit_Watt_, 100));
-    VERIF(env.publier(UVAR_PZEM_WH_INDEX,  &lent,   _Unit_Wh_,   1000));
+    VERIF(env.publier(VAR_P,  &rapide, _Unit_Watt_, 100));
+    VERIF(env.publier(VAR_WH,  &lent,   _Unit_Wh_,   1000));
 
     // periode sous le plancher : relevee a UVAR_PERIODE_MIN_MS
     float tiers = 30.0f;
-    VERIF(env.publier(UVAR_PZEM_I_COURANT, &tiers, _Unit_Ampere_, 1));
+    VERIF(env.publier(VAR_I, &tiers, _Unit_Ampere_, 1));
 
     // t=200000 : les 3 sont dues (prochaine_ms = millis() a la declaration)
     g_millis = 200000; env.poll();
@@ -341,11 +359,11 @@ int main()
 
     // envoi manuel d'une variable a periode 0
     float manuel = 42.0f;
-    VERIF(env.publier(UVAR_PZEM_PF, &manuel, _Unit_PF_, 0));
+    VERIF(env.publier(VAR_PF, &manuel, _Unit_PF_, 0));
     const uint32_t avant = env.stats().envoyes;
     g_millis = 201001; env.poll();
     VERIF(env.stats().envoyes == avant);         // periode 0 => jamais dans poll()
-    VERIF(env.envoyer(UVAR_PZEM_PF) == true);
+    VERIF(env.envoyer(VAR_PF) == true);
     VERIF(env.stats().envoyes == avant + 1);
   }
 
@@ -353,18 +371,18 @@ int main()
   titre("11. chaine sans NUL, longueur exacte");
   {
     EspNowUniVar env;
-    env.surveiller(UVAR_IOT_STATION_METEO, UVAR_NOM);
+    env.surveiller(IOT_C, VAR_NOM);
 
     const char* nom = "Station-Meteo";   // 13 caracteres
     uint8_t buf[UVAR_TRAME_MAX];
-    const uint8_t n = uvarEncode(buf, UVAR_IOT_STATION_METEO, UVAR_NOM,
+    const uint8_t n = uvarEncode(buf, IOT_C, VAR_NOM,
                                  UVAR_STRING, _Unit_Aucune_, nom, 13, 0, 0, 1);
     VERIF(n == 34);                       // 21 + 13
     env._traiterTrame(buf, n);
 
     char lu[32];
     uint32_t age;
-    VERIF(env.lireTexte(UVAR_IOT_STATION_METEO, UVAR_NOM, lu, sizeof(lu), &age) == true);
+    VERIF(env.lireTexte(IOT_C, VAR_NOM, lu, sizeof(lu), &age) == true);
     VERIF(strcmp(lu, nom) == 0);
     VERIF(strlen(lu) == 13);
 
@@ -372,19 +390,19 @@ int main()
     char long_nom[80];
     memset(long_nom, 'X', sizeof(long_nom));
     long_nom[79] = '\0';
-    const uint8_t n2 = uvarEncode(buf, UVAR_IOT_STATION_METEO, UVAR_NOM,
+    const uint8_t n2 = uvarEncode(buf, IOT_C, VAR_NOM,
                                   UVAR_STRING, _Unit_Aucune_, long_nom, 60, 0, 0, 2);
     VERIF(n2 == 81);
     env._traiterTrame(buf, n2);
 
     char lu2[64];
-    VERIF(env.lireTexte(UVAR_IOT_STATION_METEO, UVAR_NOM, lu2, sizeof(lu2), &age) == true);
+    VERIF(env.lireTexte(IOT_C, VAR_NOM, lu2, sizeof(lu2), &age) == true);
     VERIF(strlen(lu2) == UVAR_MAX_STRLEN - 1);
     VERIF(lu2[UVAR_MAX_STRLEN - 1] == '\0');
 
     // une chaine n'est pas lisible comme un float
     float pas_une_chaine;
-    VERIF(env.lire(UVAR_IOT_STATION_METEO, UVAR_NOM, pas_une_chaine, &age) == false);
+    VERIF(env.lire(IOT_C, VAR_NOM, pas_une_chaine, &age) == false);
   }
 
   // --------------------------------------------------------------------------
@@ -394,7 +412,7 @@ int main()
     char grosse[300];
     memset(grosse, 'Z', sizeof(grosse));
 
-    const uint8_t n = uvarEncode(buf, UVAR_IOT_DATALOG, UVAR_NOM, UVAR_STRING,
+    const uint8_t n = uvarEncode(buf, IOT_D, VAR_NOM, UVAR_STRING,
                                  _Unit_Aucune_, grosse, UVAR_LEN_MAX, 0, 0, 1);
     VERIF(n == UVAR_TRAME_MAX);          // 21 + 229 = 250
 
@@ -403,7 +421,7 @@ int main()
     VERIF(v.len == UVAR_LEN_MAX);
 
     // 251 octets : refuse a l'encodage, et rejete au decodage
-    VERIF(uvarEncode(buf, UVAR_IOT_DATALOG, UVAR_NOM, UVAR_STRING, _Unit_Aucune_,
+    VERIF(uvarEncode(buf, IOT_D, VAR_NOM, UVAR_STRING, _Unit_Aucune_,
                      grosse, (uint8_t)(UVAR_LEN_MAX + 1), 0, 0, 1) == 0);
 
     uint8_t trop[251];

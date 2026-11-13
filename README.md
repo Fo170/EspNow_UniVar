@@ -88,7 +88,7 @@ parc entièrement métropolitain.
 
 ```ini
 lib_deps =
-    https://github.com/Fo170/EspNow_UniVar.git@^1.1.1
+    https://github.com/Fo170/EspNow_UniVar.git@^2.0.0
     https://github.com/Fo170/Unity_Dictionary.git@^1.2.0
 ```
 
@@ -104,15 +104,15 @@ des deux `struct` incompatibles.
 #include <EspNow_UniVar.h>
 
 EspNowUniVar env;
-float    pzem_s  = 0.0f;    // VA
-uint32_t pzem_wh = 0;       // Wh
+float    tension = 0.0f;    // V
+uint32_t energie = 0;       // Wh
 
 void setup() {
-  env.begin(UVAR_IOT_PZEM004T);
+  env.begin(ID_IOT_CAPTEUR);          // votre contrat
 
-  env.publier(UVAR_PZEM_S_APPARENTE, &pzem_s,  _Unit_VA_,   1000);
-  env.publier(UVAR_PZEM_WH_INDEX,    &pzem_wh, _Unit_Wh_,  60000);
-  env.publierTexte(UVAR_NOM, "PZEM-004T", _Unit_Aucune_, 300000);
+  env.publier(VAR_TENSION, &tension, _Unit_Volt_,   1000);
+  env.publier(VAR_ENERGIE, &energie, _Unit_Wh_,    60000);
+  env.publierTexte(VAR_NOM, "capteur-A", _Unit_Aucune_, 300000);
 }
 
 void loop() {
@@ -137,11 +137,11 @@ jour sa variable, elle n'appelle jamais la lib pour publier.
 ## Réception
 
 ```cpp
-env.surveiller(UVAR_IOT_PZEM004T,  UVAR_PZEM_S_APPARENTE);
-env.surveiller(UVAR_IOT_LINKYSTIC, UVAR_LINKY_P_APP);
+env.surveiller(ID_IOT_CAPTEUR, VAR_ENERGIE);
+env.surveiller(ID_IOT_STATION, VAR_TENSION);
 
 float p; uint32_t age;
-if (env.lire(UVAR_IOT_PZEM004T, UVAR_PZEM_S_APPARENTE, p, &age) && age < 3000) {
+if (env.lire(ID_IOT_CAPTEUR, VAR_ENERGIE, p, &age) && age < 3000) {
     // mesure fraîche de moins de 3 s
 }
 ```
@@ -218,54 +218,76 @@ et des **abonnements**. Ajouter un appareil ne modifie le firmware d'aucun autre
 
 ---
 
-## Contrat des identifiants — `EspNow_UniVar_Vars.h`
+## Vous définissez votre contrat
 
-| Plage `id_var` | Domaine |
+**La librairie est agnostique** : elle ne connaît aucun identifiant métier.
+Elle fournit le **format**, le **transport** et les **règles** ; les valeurs de
+`id_iot` et `id_var` appartiennent à votre application.
+
+```
+Librairie  : magic 'F','V', version, CRC, transport, slots, abonnements
+Votre code : « le nœud 3 publie la variable 12, qui est une température »
+```
+
+### Les trois règles à respecter
+
+| Règle | Pourquoi |
 |---|---|
-| 0 | réservé |
+| **0 est réservé** | `id_iot = 0` et `id_var = 0` sont refusés par le protocole (`UVAR_ID_IOT_INVALIDE`, `UVAR_ID_VAR_INVALIDE`) |
+| **APPEND-ONLY** | un numéro attribué n'est jamais renuméroté ni réutilisé : un récepteur non reflashé lirait une valeur sous un autre sens |
+| **une unité par variable** | fixée par votre contrat, pas par l'émetteur : deux nœuds qui publient la même grandeur publient la même unité |
+
+### Exemple de contrat local
+
+Créez un fichier partagé entre tous vos nœuds — **jamais dans cette librairie** :
+
+```cpp
+// mon_contrat.h — les identifiants de MON parc
+#define ID_IOT_CAPTEUR    1     // identifiant du nœud émetteur
+#define ID_IOT_STATION    2
+
+#define VAR_TENSION       1     // V
+#define VAR_COURANT       2     // A
+#define VAR_ENERGIE       3     // Wh  (uint32)
+#define VAR_NOM           4     // chaîne
+```
+
+Puis, dans chaque nœud :
+
+```cpp
+#include <EspNow_UniVar.h>
+#include "mon_contrat.h"
+
+env.begin(ID_IOT_CAPTEUR);
+env.publier(VAR_ENERGIE, &wh, _Unit_Wh_, 60000);
+```
+
+### Suggestion de plages
+
+Facultatives, mais elles évitent le chaos quand le parc grandit :
+
+| Plage | Domaine |
+|---|---|
 | 1 – 99 | énergie et comptage |
-| 100 – 199 | **mesures** d'environnement (T, RH, P, sol, lux, alim) |
-| 200 – 249 | **commandes** — du maître vers les appareils |
-| 250 – 299 | **états** — des appareils vers tout le monde |
+| 100 – 199 | mesures d'environnement |
+| 200 – 249 | commandes (d'un maître vers les appareils) |
+| 250 – 299 | états (des appareils vers tous) |
 | 300 – 399 | identité et diagnostic |
 
-La séparation **commandes / états** rend le sens de circulation explicite.
+### L'unité est dans la trame
 
-**APPEND-ONLY.** Un numéro attribué n'est jamais renuméroté ni réutilisé : un
-récepteur non reflashé lirait une valeur sous un autre sens. Une variable
-retirée laisse son numéro **brûlé**.
+Le champ `unit` transporte le code de
+[`Unity_Dictionary`](https://github.com/Fo170/Unity_Dictionary). Un récepteur
+peut donc **vérifier** l'unité au lieu de la supposer.
 
-### L'unité est fixée par le contrat
+Unité de **base** par défaut (températures, tensions, résistances, durées) :
+le préfixe (k, M, m) relève de l'affichage, donc de
+[`Unity`](https://github.com/Fo170/Unity).
 
-Deux nœuds qui publient la même grandeur publient la **même** unité. Un récepteur
-peut se fier au contrat — et vérifier `unit` à la réception au lieu de le supposer.
-
-**Unité de base par défaut** (températures, tensions, résistances, durées, %) :
-`_Unit_Centigrade_`, `_Unit_Volt_`, `_Unit_Ohms_`, `_Unit_Wh_`… Le préfixe
-(k, M, m) relève de l'affichage, donc de `Unity`.
-
-**Dérogation assumée — énergie du PZEM** : `UVAR_PZEM_S_APPARENTE` en **kVA**,
-`UVAR_PZEM_Q_REACTIVE` en **kVAR**, `UVAR_PZEM_WH_INDEX` en **kWh**, parce que
-les capteurs d'énergie Domoticz sont configurés sur ces magnitudes précises.
-Convertir à la frontière HTTP ajouterait une source d'erreur sans bénéfice.
-
-⚠️ Ces trois variables sont **les seules** concernées. `UVAR_LINKY_P_APP` est en
-**VA**, `UVAR_LINKY_WH_TOTAL` en **Wh `uint32`**, `UVAR_SOL_RESISTANCE` en **Ω**.
-
-### Commandes chauffage (200 – 209)
-
-Le modèle de `commande_rad` (`0_INCLUDE_/Arduino/Radiateur.h`) est repris tel quel :
-
-| `id_var` | Contenu |
-|---|---|
-| 200 `UVAR_RAD_ORDRE_ZONES` | mot **8 bits** historique, bit 0 = zone 1 … bit 7 = zone 8 |
-| 201-208 `UVAR_RAD_CONSIGNE_Z1..Z8` | consigne **moyenne** visée par zone (°C) |
-| 209 `UVAR_RAD_MODE_ZONES` | 2 bits/zone : 0 Arrêt · 1 Hors gel · 2 Éco · 3 Confort |
-
-Le fil pilote n'a que **deux** positions (Confort 19 °C / Éco 17 °C). L'Ordonnanceur
-module le **rapport cyclique** entre les deux : l'inertie du radiateur lisse et la
-température moyenne se place entre 17 et 19 °C. Le thermostat interne du radiateur
-ferme la boucle — aucun asservissement de température côté maître.
+Si votre domaine impose une magnitude précise — par exemple des capteurs
+d'énergie configurés en **kVA / kWh** — utilisez les codes correspondants
+(`_Unit_kVA_`, `_Unit_kWH_`) : c'est légitime, à condition que le contrat le
+fixe une fois pour toutes.
 
 ---
 

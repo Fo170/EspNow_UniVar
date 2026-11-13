@@ -22,13 +22,13 @@
 //      par lecture octet par octet (alignement de double non garanti)
 //
 //  Auteur  : FOURNET Olivier (GPL-3.0)
-//  Version : 1.1.1
+//  Version : 2.0.0
 // ============================================================================
 #ifndef ESPNOW_UNIVAR_H
 #define ESPNOW_UNIVAR_H
 
 // Version de la librairie (source UNIQUE — agrégée par liste_lib.h)
-#define __ESPNOW_UNIVAR_H_VERSION__ "1.1.1"
+#define __ESPNOW_UNIVAR_H_VERSION__ "2.0.0"
 
 #include <Arduino.h>
 #include <stdint.h>
@@ -39,7 +39,6 @@
 // le MÊME dictionnaire (c'est la leçon des deux structs incompatibles).
 #include <Unity_Dictionary.h>
 
-#include "EspNow_UniVar_Vars.h"
 
 // ============================================================================
 //  PLATEFORME
@@ -91,6 +90,17 @@
 #ifndef UVAR_PERIODE_MIN_MS
   #define UVAR_PERIODE_MIN_MS 100  // plancher : protège d'une période absurde
 #endif
+
+// ============================================================================
+//  REGLES DU PROTOCOLE — valeurs réservées, valables pour tout utilisateur
+//
+//  ⚠️ La librairie est AGNOSTIQUE : elle ne connaît AUCUN identifiant métier.
+//     Les valeurs de `id_iot` et `id_var` sont définies par l'application, dans
+//     son propre fichier de contrat. Ici, on ne fixe que ce que le format
+//     interdit : les valeurs 0.
+// ============================================================================
+#define UVAR_ID_IOT_INVALIDE   0    // id_iot 0 = émetteur non identifié → refusé
+#define UVAR_ID_VAR_INVALIDE   0    // id_var 0 = variable non déclarée   → refusée
 
 // ============================================================================
 //  TYPES DE VALEUR
@@ -190,7 +200,7 @@ inline uint8_t uvarEncode(uint8_t* buf, uint8_t id_iot, uint16_t id_var,
 {
   if (buf == nullptr || valeur == nullptr) return 0;
   if (len == 0 || len > UVAR_LEN_MAX)      return 0;
-  if (id_iot == UVAR_IOT_INDEFINI)         return 0;
+  if (id_iot == UVAR_ID_IOT_INVALIDE)         return 0;
   if (id_var == 0)                         return 0;
 
   uint16_t i = 0;
@@ -266,7 +276,7 @@ inline uint8_t uvarDecode(const uint8_t* buf, uint16_t n, UniVarVue& vue)
   vue.epoch  = uvarGet32(&buf[13 + len]);
   vue.seq    = uvarGet16(&buf[17 + len]);
 
-  if (vue.id_iot == UVAR_IOT_INDEFINI || vue.id_var == 0) return UVAR_INCONNU;
+  if (vue.id_iot == UVAR_ID_IOT_INVALIDE || vue.id_var == 0) return UVAR_INCONNU;
 
   return UVAR_OK;
 }
@@ -345,7 +355,7 @@ struct UniVarStats {
 class EspNowUniVar {
 public:
   EspNowUniVar()
-    : _id_iot(UVAR_IOT_INDEFINI), _epoch(0), _t_fct(0),
+    : _id_iot(UVAR_ID_IOT_INVALIDE), _epoch(0), _t_fct(0),
       _seq(0), _initialise(false), _canal(0),
       _fenetre_debut(0), _fenetre_paquets(0), _heure_externe(false)
   {
@@ -362,7 +372,7 @@ public:
   // Initialise la radio et enregistre le peer de diffusion.
   bool begin(uint8_t id_iot, uint8_t canal = 0)
   {
-    if (id_iot == UVAR_IOT_INDEFINI) return false;
+    if (id_iot == UVAR_ID_IOT_INVALIDE) return false;
     _id_iot = id_iot;
     _canal  = canal;
     return _demarrerRadio();
@@ -431,7 +441,7 @@ public:
   // non surveillées sont comptées au lieu d'écraser un slot.
   bool surveiller(uint8_t id_iot, uint16_t id_var)
   {
-    if (id_iot == UVAR_IOT_INDEFINI || id_var == 0) return false;
+    if (id_iot == UVAR_ID_IOT_INVALIDE || id_var == 0) return false;
     if (_trouverSlot(id_iot, id_var) >= 0) return true;
 
     for (int i = 0; i < UVAR_MAX_SLOTS; i++) {

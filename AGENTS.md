@@ -5,7 +5,7 @@ Instructions pour les agents IA travaillant sur ce dépôt.
 ## Informations générales
 
 - **Nom de la librairie** : EspNow_UniVar
-- **Version** : 1.1.1
+- **Version** : 2.0.0
 - **Compte GitHub** : https://github.com/Fo170/
 - **Auteur** : Olivier FOURNET
 - **Email** : olivier.fournet@free.fr
@@ -16,6 +16,26 @@ Instructions pour les agents IA travaillant sur ce dépôt.
 
 Cette librairie transporte **une variable par paquet ESP-NOW**. Elle ne fait
 que ça.
+
+## ⚠️ AGNOSTICISME — la règle la plus importante
+
+**La librairie ne doit connaître AUCUN identifiant métier.** Pas de `UVAR_PZEM_*`,
+pas de `UVAR_RAD_*`, pas de `UVAR_IOT_PZEM004T`. Rien qui parle d'un appareil,
+d'une pièce ou d'une grandeur physique particulière.
+
+| Ce qui appartient à la librairie | Ce qui appartient à l'application |
+|---|---|
+| magic, version, CRC, taille de trame | les valeurs de `id_iot` |
+| `publier` / `poll` / `surveiller` / `lire` | les valeurs de `id_var` |
+| la table de slots, les compteurs | le sens métier de chaque variable |
+| les règles du protocole (0 = invalide) | les unités retenues par variable |
+
+Un contrat d'application (identifiants du parc) vit **hors de ce dépôt**, dans
+le dossier partagé du projet ou dans un dépôt séparé. Il ne doit **jamais**
+être ajouté à `src/`.
+
+Si une demande implique d'ajouter une constante métier dans `src/`, c'est le
+signe qu'elle doit aller dans le contrat de l'application.
 
 - ❌ Pas d'ACK, pas d'unicast, pas de retransmission (c'est de la télémétrie en
   diffusion, pas du commandement).
