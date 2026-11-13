@@ -5,7 +5,7 @@ Instructions pour les agents IA travaillant sur ce dépôt.
 ## Informations générales
 
 - **Nom de la librairie** : EspNow_UniVar
-- **Version** : 1.1.0
+- **Version** : 1.1.1
 - **Compte GitHub** : https://github.com/Fo170/
 - **Auteur** : Olivier FOURNET
 - **Email** : olivier.fournet@free.fr
@@ -23,6 +23,17 @@ que ça.
 - ❌ Pas de découverte automatique de peers, pas de routage multi-sauts.
 - ❌ Pas de stockage persistant.
 - ❌ Pas de calcul métier : pas de conversion d'unité, pas d'arrondi.
+
+## Dépendances
+
+| Dépendance | Rôle |
+|---|---|
+| `Unity_Dictionary` | **code** — `EspNow_UniVar.h` en a besoin : les codes `_Unit_*` sont dans la trame |
+| `Unity` | **affichage** — préfixes SI, utilisé par les exemples et les applications |
+
+Les deux sont déclarées dans `library.json`. Oublier `Unity` fait échouer
+`pio run` sur `Unity.h: No such file or directory` dès qu'un exemple est
+compilé — c'est arrivé en v1.1.0, corrigé en v1.1.1.
 
 ## Règles de conception non négociables
 

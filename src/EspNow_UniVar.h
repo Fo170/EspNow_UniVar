@@ -22,13 +22,13 @@
 //      par lecture octet par octet (alignement de double non garanti)
 //
 //  Auteur  : FOURNET Olivier (GPL-3.0)
-//  Version : 1.1.0
+//  Version : 1.1.1
 // ============================================================================
 #ifndef ESPNOW_UNIVAR_H
 #define ESPNOW_UNIVAR_H
 
 // Version de la librairie (source UNIQUE — agrégée par liste_lib.h)
-#define __ESPNOW_UNIVAR_H_VERSION__ "1.1.0"
+#define __ESPNOW_UNIVAR_H_VERSION__ "1.1.1"
 
 #include <Arduino.h>
 #include <stdint.h>

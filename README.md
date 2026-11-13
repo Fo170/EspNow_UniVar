@@ -88,7 +88,7 @@ parc entièrement métropolitain.
 
 ```ini
 lib_deps =
-    https://github.com/Fo170/EspNow_UniVar.git@^1.1.0
+    https://github.com/Fo170/EspNow_UniVar.git@^1.1.1
     https://github.com/Fo170/Unity_Dictionary.git@^1.2.0
 ```
 

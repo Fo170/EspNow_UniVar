@@ -1,6 +1,6 @@
 {
   "name": "EspNow_UniVar",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "ESP-NOW mono-variable : un paquet = une variable, trame auto-descriptive (magic/ver/type/unité/longueur/CRC-16) avec horodatage UTC et numéro de séquence. Remplace les deux structs monolithiques du parc (EspNowEchange 40 o et struct_message_iOT_espnow ~90 o) qui se rejetaient mutuellement. Header-only, zéro allocation dynamique.",
   "keywords": [
     "esp-now",
@@ -33,7 +33,8 @@
   ],
   "headers": "EspNow_UniVar.h",
   "dependencies": {
-    "Unity_Dictionary": "https://github.com/Fo170/Unity_Dictionary.git#v1.2.0"
+    "Unity_Dictionary": "https://github.com/Fo170/Unity_Dictionary.git#v1.2.0",
+    "Unity": "https://github.com/Fo170/Unity.git#v1.0.1"
   },
   "build": {
     "srcDir": "src"

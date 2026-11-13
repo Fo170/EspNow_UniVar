@@ -3,6 +3,28 @@
 Toutes les dates sont au format AAAA-MM-JJ.
 Le versionnage suit [SemVer](https://semver.org/lang/fr/).
 
+## [1.1.1] - 2026-11-13
+
+### 🐛 Corrigé
+
+- `library.json` / `library.properties` ne déclaraient que `Unity_Dictionary`,
+  alors que l'exemple `Recepteur` utilise `<Unity.h>` pour l'affichage SI.
+  Un projet qui n'ajoutait que `EspNow_UniVar` en `lib_deps` échouait sur
+  `Unity.h: No such file or directory`. `Unity` est désormais une dépendance
+  déclarée.
+
+Détecté par le test de publication : `pio run` sur un projet vierge ne déclarant
+que `https://github.com/Fo170/EspNow_UniVar.git@^1.1.0`.
+
+### Précision sur les dépendances
+
+| Dépendance | Rôle |
+|---|---|
+| `Unity_Dictionary` | **code** : les codes `_Unit_*` et `Str_Unit()` sont utilisés par la librairie |
+| `Unity` | **affichage** : préfixes SI (`C_UNITY::valeurAvecUnite`), utilisé par les exemples |
+
+---
+
 ## [1.1.0] - 2026-11-13
 
 ### 🔄 Contrat revu — modèle d'échange uniforme
