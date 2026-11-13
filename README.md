@@ -88,7 +88,7 @@ parc entièrement métropolitain.
 
 ```ini
 lib_deps =
-    https://github.com/Fo170/EspNow_UniVar.git@^2.1.0
+    https://github.com/Fo170/EspNow_UniVar.git@^2.2.0
     https://github.com/Fo170/Unity_Dictionary.git@^1.2.0
 ```
 
@@ -175,16 +175,19 @@ Mais le callback de réception s'exécute dans la **tâche WiFi**, pendant que
 l'application lit dans `loop()` — deux cœurs sur ESP32, préemption sur ESP8266.
 Un `memcpy` de `double` (8 o) ou de chaîne (24 o) n'est donc **pas atomique**.
 
-Un **seqlock** par slot garantit qu'une lecture ne renvoie jamais une valeur
-partielle : compteur impair pendant l'écriture, pair quand elle est stable, le
-lecteur recommence si le compteur a bougé.
+Un **verrou court** (`_verrou()` / `_deverrou()`) encadre la copie : la nouvelle
+valeur ne peut pas être écrite pendant qu'on la lit, et inversement. La section
+critique ne dure qu'une copie de quelques octets, soit ~1 µs.
 
 | | |
 |---|---|
-| File d'attente | aucune |
-| Verrou bloquant | aucun (pas d'inversion de priorité avec la tâche WiFi) |
-| Coût mémoire | 0 octet — le compteur tient dans le remplissage du slot |
-| Signal d'anomalie | `stats().lecture_conflit` — doit rester à 0 |
+| File d'attente | aucune — la valeur reçue remplace l'ancienne |
+| Verrou | court, non bloquant en pratique (~1 µs) |
+| Coût mémoire | 4 o (un mutex pour toute la librairie) |
+| Ordre d'écriture | `valide = true` **en dernier**, dans la section critique |
+
+Sur ESP32 : `portENTER_CRITICAL` (spinlock, protège entre les deux cœurs).
+Sur ESP8266 : `noInterrupts()` (la tâche WiFi est en interruption).
 
 ---
 
@@ -344,11 +347,11 @@ Aucune carte, aucun flash — la logique de trame est testée sur l'ordinateur :
 ./test/host/run.sh
 ```
 
-**13 exigences, 172 vérifications** : aller-retour de chaque type, CRC (1 bit
+**12 exigences, 158 vérifications** : aller-retour de chaque type, CRC (1 bit
 corrompu rejeté), incohérence `len`/`type`, refus de `len > 229`, `magic`/`ver`,
 paire non surveillée, `age_ms` exact (dont débordement de `millis()`), trous de
 séquence, plafond d'émission, périodes indépendantes, chaînes sans NUL, trame de
-250 o, et **seqlock** : une lecture pendant une écriture ne renvoie rien.
+250 o.
 
 ---
 

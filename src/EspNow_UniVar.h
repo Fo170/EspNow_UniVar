@@ -22,13 +22,13 @@
 //      par lecture octet par octet (alignement de double non garanti)
 //
 //  Auteur  : FOURNET Olivier (GPL-3.0)
-//  Version : 2.1.0
+//  Version : 2.2.0
 // ============================================================================
 #ifndef ESPNOW_UNIVAR_H
 #define ESPNOW_UNIVAR_H
 
 // Version de la librairie (source UNIQUE — agrégée par liste_lib.h)
-#define __ESPNOW_UNIVAR_H_VERSION__ "2.1.0"
+#define __ESPNOW_UNIVAR_H_VERSION__ "2.2.0"
 
 #include <Arduino.h>
 #include <stdint.h>
@@ -314,10 +314,6 @@ struct UniVarSlot {
   uint32_t rx_ms;
   uint32_t perdus;
   uint16_t seq;
-  // Seqlock : impair = écriture en cours, pair = valeur stable.
-  // Tient dans le remplissage existant : sizeof(UniVarSlot) reste 60 o.
-  // Un SEUL écrivain (la tâche WiFi) → l'incrément n'a pas besoin d'être atomique.
-  uint16_t seq_ecriture;
 };
 
 // ============================================================================
@@ -351,7 +347,6 @@ struct UniVarStats {
   uint32_t ancien_format;
   uint32_t non_surveille;
   uint32_t perdus;          // somme des trous de séquence sur les slots surveillés
-  uint32_t lecture_conflit; // lectures ayant échoué faute de stabilité (seqlock)
 };
 
 // ============================================================================
@@ -468,26 +463,19 @@ public:
   {
     const int i = _trouverSlot(id_iot, id_var);
     if (i < 0) return false;
-    UniVarSlot& s = _slots[i];
 
-    // Seqlock : on relit si la valeur a bougé pendant la copie. Pas de verrou,
-    // donc aucun risque d'inverser la priorité avec la tâche WiFi.
-    for (uint8_t essai = 0; essai < 4; essai++) {
-      const uint16_t v1 = s.seq_ecriture;
-      if (v1 & 1u) continue;                 // écriture en cours
-      const bool    valide = s.valide;
-      const uint8_t type   = s.type;
-      const uint32_t rx    = s.rx_ms;
-      memcpy(&v, s.val, sizeof(T));
-      if (s.seq_ecriture != v1) continue;    // a bougé : on recommence
+    _verrou();
+    const UniVarSlot& s = _slots[i];
+    const bool    valide = s.valide;
+    const uint8_t type   = s.type;
+    const uint32_t rx    = s.rx_ms;
+    if (valide && type == uvarTypeDe<T>()) memcpy(&v, s.val, sizeof(T));
+    _deverrou();
 
-      if (!valide) return false;
-      if (type != uvarTypeDe<T>()) return false;
-      if (age_ms) *age_ms = (uint32_t)(millis() - rx);
-      return true;
-    }
-    _stats.lecture_conflit++;
-    return false;
+    if (!valide) return false;
+    if (type != uvarTypeDe<T>()) return false;
+    if (age_ms) *age_ms = (uint32_t)(millis() - rx);
+    return true;
   }
 
   // Lecture d'une chaîne (toujours terminée par NUL).
@@ -497,28 +485,25 @@ public:
     if (dst == nullptr || taille == 0) return false;
     const int i = _trouverSlot(id_iot, id_var);
     if (i < 0) return false;
-    UniVarSlot& s = _slots[i];
 
-    for (uint8_t essai = 0; essai < 4; essai++) {
-      const uint16_t v1 = s.seq_ecriture;
-      if (v1 & 1u) continue;
-      const bool    valide = s.valide;
-      const uint8_t type   = s.type;
-      const uint8_t len    = s.len;
-      const uint32_t rx    = s.rx_ms;
-      size_t n = len;
+    bool valide, ok;
+    uint32_t rx;
+    _verrou();
+    {
+      const UniVarSlot& s = _slots[i];
+      valide = s.valide;
+      ok     = valide && (s.type == UVAR_STRING);
+      rx     = s.rx_ms;
+      size_t n = s.len;
       if (n > taille - 1) n = taille - 1;
       if (n > UVAR_MAX_STRLEN - 1) n = UVAR_MAX_STRLEN - 1;
-      memcpy(dst, s.texte, n);
-      dst[n] = '\0';
-      if (s.seq_ecriture != v1) continue;
-
-      if (!valide || type != UVAR_STRING) return false;
-      if (age_ms) *age_ms = (uint32_t)(millis() - rx);
-      return true;
+      if (ok) { memcpy(dst, s.texte, n); dst[n] = '\0'; }
     }
-    _stats.lecture_conflit++;
-    return false;
+    _deverrou();
+
+    if (!ok) return false;
+    if (age_ms) *age_ms = (uint32_t)(millis() - rx);
+    return true;
   }
 
   // Métadonnées d'un slot, sans lire la valeur.
@@ -527,25 +512,25 @@ public:
   {
     const int i = _trouverSlot(id_iot, id_var);
     if (i < 0) return false;
-    UniVarSlot& s = _slots[i];
 
-    for (uint8_t essai = 0; essai < 4; essai++) {
-      const uint16_t v1 = s.seq_ecriture;
-      if (v1 & 1u) continue;
-      const bool    valide = s.valide;
-      const uint8_t t_ = s.type, u_ = s.unit;
-      const uint32_t rx_ = s.rx_ms, p_ = s.perdus;
-      if (s.seq_ecriture != v1) continue;
-
-      if (!valide) return false;
-      if (type)   *type   = t_;
-      if (unit)   *unit   = u_;
-      if (age_ms) *age_ms = (uint32_t)(millis() - rx_);
-      if (perdus) *perdus = p_;
-      return true;
+    bool valide;
+    uint8_t t_, u_;
+    uint32_t rx_, p_;
+    _verrou();
+    {
+      const UniVarSlot& s = _slots[i];
+      valide = s.valide;
+      t_ = s.type; u_ = s.unit;
+      rx_ = s.rx_ms; p_ = s.perdus;
     }
-    _stats.lecture_conflit++;
-    return false;
+    _deverrou();
+
+    if (!valide) return false;
+    if (type)   *type   = t_;
+    if (unit)   *unit   = u_;
+    if (age_ms) *age_ms = (uint32_t)(millis() - rx_);
+    if (perdus) *perdus = p_;
+    return true;
   }
 
   // --------------------------------------------------------------------------
@@ -560,14 +545,6 @@ public:
   {
     if (len) *len = _derniereLen;
     return _derniereTrame;
-  }
-
-  // Accès au slot brut : permet de simuler une écriture concurrente et de
-  // vérifier que lire() ne renvoie JAMAIS une valeur partielle.
-  UniVarSlot* slotPourTest(uint8_t id_iot, uint16_t id_var)
-  {
-    const int i = _trouverSlot(id_iot, id_var);
-    return (i < 0) ? nullptr : &_slots[i];
   }
 #endif
 
@@ -616,10 +593,10 @@ public:
       }
     }
 
-    // ── Seqlock : impair pendant l'écriture, pair quand la valeur est stable ──
-    // `valide` est posé EN DERNIER : un lecteur ne peut pas voir un slot marqué
-    // valide alors que la valeur n'est pas encore copiée.
-    s.seq_ecriture++;
+    // Verrou court : empêche une lecture pendant la copie. `valide` est posé
+    // EN DERNIER, dans la même section : le lecteur ne peut jamais voir un slot
+    // marqué valide alors que la valeur n'est pas encore écrite.
+    _verrou();
 
     s.type   = vue.type;
     s.unit   = vue.unit;
@@ -642,7 +619,7 @@ public:
     }
 
     s.valide = true;
-    s.seq_ecriture++;
+    _deverrou();
   }
 
   // --------------------------------------------------------------------------
@@ -767,6 +744,35 @@ private:
 
   uint32_t _tFct() const { return _heure_externe ? _t_fct : (uint32_t)(millis() / 1000UL); }
 
+  // --------------------------------------------------------------------------
+  //  VERROU COURT — le seul mécanisme de synchronisation de la librairie
+  //
+  //  Le callback de réception s'exécute dans la tâche WiFi, pas dans loop() :
+  //  deux cœurs sur ESP32, préemption sur ESP8266. Sans verrou, on peut lire un
+  //  slot pendant que la nouvelle valeur s'y écrit (un memcpy de 8 ou 24 octets
+  //  n'est pas atomique).
+  //
+  //  La section critique ne couvre qu'une copie de quelques octets : ~1 µs.
+  //  Aucune file d'attente : la valeur reçue REMPLACE simplement l'ancienne.
+  // --------------------------------------------------------------------------
+  void _verrou()
+  {
+#if defined(ESP32)
+    portENTER_CRITICAL(&_mux);
+#elif defined(ESP8266)
+    noInterrupts();
+#endif
+  }
+
+  void _deverrou()
+  {
+#if defined(ESP32)
+    portEXIT_CRITICAL(&_mux);
+#elif defined(ESP8266)
+    interrupts();
+#endif
+  }
+
   void _majFenetre(uint32_t maintenant)
   {
     if ((uint32_t)(maintenant - _fenetre_debut) >= 1000UL) {
@@ -857,6 +863,10 @@ private:
 #if defined(UVAR_HOST_TEST)
   uint8_t _derniereTrame[UVAR_TRAME_MAX];
   uint8_t _derniereLen = 0;
+#endif
+
+#if defined(ESP32)
+  portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;   // verrou court (voir _verrou)
 #endif
 
   static const uint8_t _BROADCAST[6];

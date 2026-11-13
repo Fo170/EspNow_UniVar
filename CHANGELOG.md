@@ -3,6 +3,45 @@
 Toutes les dates sont au format AAAA-MM-JJ.
 Le versionnage suit [SemVer](https://semver.org/lang/fr/).
 
+## [2.2.0] - 2026-11-13
+
+### 🔧 Simplifié — le seqlock devient un verrou court
+
+Le seqlock de la 2.1.0 garantissait bien l'atomicité, mais imposait une **boucle
+de relecture dans trois fonctions** (`lire`, `lireTexte`, `infos`) et un compteur
+de version par slot. Trop de mécanique pour une copie de quelques octets.
+
+Remplacé par un **verrou court** : `_verrou()` / `_deverrou()`, une section
+critique qui ne couvre que la copie.
+
+| | Seqlock (2.1.0) | Verrou court (2.2.0) |
+|---|---|---|
+| Code | ~40 lignes, 3 boucles de relecture | **~10 lignes**, aucune boucle |
+| Blocage | aucun | ~1 µs (une copie de ≤ 24 o) |
+| Mémoire | 2 o/slot (dans le remplissage) | 4 o (un mutex pour toute la librairie) |
+| Champ public | `stats().lecture_conflit` | *(supprimé — sans objet)* |
+
+Le principe reste inchangé : **aucune file d'attente**, la valeur reçue remplace
+simplement l'ancienne, et `valide` est posé **en dernier** dans la section
+critique — un lecteur ne peut jamais voir un slot marqué valide avec une valeur
+pas encore écrite.
+
+### ⚠️ Rupture mineure
+
+`UniVarStats::lecture_conflit` disparaît (il n'a de sens qu'avec un seqlock).
+Aucun consommateur : le champ datait de la 2.1.0, publiée quelques minutes plus tôt.
+
+### Recette
+
+Retour à **12 exigences / 158 vérifications** : le test 13 testait
+spécifiquement le seqlock. La garantie du verrou est structurelle (exclusion
+mutuelle) et ne se simule pas sur un hôte mono-thread.
+
+Vérifié : ESP8266, ESP32 IDF 4.4 et ESP32 IDF 5.5 — `noInterrupts()` et
+`portENTER_CRITICAL` compilent sur les trois.
+
+---
+
 ## [2.1.0] - 2026-11-13
 
 ### 🐛 Corrigé — lectures cohérentes sans buffer ni verrou

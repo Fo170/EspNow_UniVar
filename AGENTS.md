@@ -5,7 +5,7 @@ Instructions pour les agents IA travaillant sur ce dépôt.
 ## Informations générales
 
 - **Nom de la librairie** : EspNow_UniVar
-- **Version** : 2.1.0
+- **Version** : 2.2.0
 - **Compte GitHub** : https://github.com/Fo170/
 - **Auteur** : Olivier FOURNET
 - **Email** : olivier.fournet@free.fr
@@ -77,21 +77,23 @@ compilé — c'est arrivé en v1.1.0, corrigé en v1.1.1.
 Le callback de réception s'exécute dans la **tâche WiFi**, pas dans `loop()`.
 Sur ESP32 ce sont deux cœurs ; sur ESP8266 la tâche WiFi préempte `loop()`.
 
-**Toute écriture de slot doit être encadrée par le seqlock** :
+**Toute écriture de slot doit être encadrée par `_verrou()` / `_deverrou()`**,
+et `valide = true` doit rester **en dernier**, à l'intérieur de la section :
 
 ```cpp
-s.seq_ecriture++;      // impair : écriture en cours
-// ... écrire tous les champs, y compris la valeur ...
+_verrou();
+// ... écrire tous les champs ...
 s.valide = true;       // EN DERNIER
-s.seq_ecriture++;      // pair : valeur stable
+_deverrou();
 ```
 
-Et toute lecture doit relire si `seq_ecriture` a changé pendant la copie.
-Ne jamais lire `valide` puis la valeur sans cette protection : c'est le bug
-corrigé en 2.1.0 (`valide` était posé avant la copie).
+Toute lecture doit faire de même autour de la copie. Ne jamais lire `valide`
+puis la valeur hors section : c'est le bug corrigé en 2.1.0 (`valide` était
+posé avant la copie).
 
-Aucune file d'attente, aucun verrou bloquant : le seqlock est sans attente et
-ne peut pas inverser la priorité avec la tâche WiFi.
+Aucune file d'attente : la valeur reçue **remplace** simplement l'ancienne.
+La section critique est volontairement minuscule (~1 µs) — ne rien y ajouter
+qui puisse allonger ou bloquer.
 
 ## `EspNow_UniVar_Vars.h` — APPEND-ONLY
 
