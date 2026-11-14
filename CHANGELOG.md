@@ -3,6 +3,47 @@
 Toutes les dates sont au format AAAA-MM-JJ.
 Le versionnage suit [SemVer](https://semver.org/lang/fr/).
 
+## [2.2.1] - 2026-11-14
+
+### 🐛 Corrigé — `rearm()` coupait la connexion WiFi qu'il devait préserver
+
+**Symptôme observé** sur le BME280 Garage (14/11/2026) : la carte se connectait,
+puis perdait la connexion, rebasculait sur un autre réseau, se reconnectait, et
+recommençait — indéfiniment. Résultat : injoignable (ni ICMP, ni ARP, ni mDNS).
+
+**Cause.** `rearm()` appelait `_demarrerRadio()`, qui commençait par :
+
+```cpp
+WiFi.mode(WIFI_STA);
+WiFi.disconnect(false);      // ← coupe l'association en cours
+```
+
+Or les gestionnaires WiFi rappellent `rearm()` **à chaque (re)connexion**,
+précisément parce que leur reset (`WiFi.mode(WIFI_OFF)`) a détruit le stack
+ESP-NOW. D'où la boucle :
+
+```
+connecté → rearm() → déconnecté → reconnecté → rearm() → …
+```
+
+Second défaut : `esp_now_add_peer()` sur un peer **déjà présent** échoue, donc le
+canal n'était même pas mis à jour.
+
+**Correction.**
+
+| Avant | Après |
+|---|---|
+| `rearm()` → `_demarrerRadio()` (touche WiFi) | `rearm()` → `_demarrerRadio(false)` : **le mode WiFi n'est jamais modifié** |
+| `_initialise` conservé → stack jamais ré-initialisé | `_initialise = false` puis ré-init complète (init + callbacks + peer) |
+| `esp_now_add_peer()` seul | `esp_now_del_peer()` **puis** `esp_now_add_peer()` → canal réellement appliqué |
+
+`begin()` garde le comportement d'origine (`toucherWifi = true`) : il est appelé
+au démarrage, avant `WiFi.begin()`, où forcer le mode station est légitime.
+
+**Impact** : tous les nœuds qui appelaient `rearm()` après une reconnexion
+(Thermometre, Radiateur, Station_Meteo, Surveillance_Batterie, LinkysTIC,
+ESP32_Ordonnanceur) retrouvent une connexion stable.
+
 ## [2.2.0] - 2026-11-13
 
 ### 🔧 Simplifié — le seqlock devient un verrou court

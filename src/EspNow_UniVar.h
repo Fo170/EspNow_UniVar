@@ -28,7 +28,7 @@
 #define ESPNOW_UNIVAR_H
 
 // Version de la librairie (source UNIQUE — agrégée par liste_lib.h)
-#define __ESPNOW_UNIVAR_H_VERSION__ "2.2.0"
+#define __ESPNOW_UNIVAR_H_VERSION__ "2.2.1"
 
 #include <Arduino.h>
 #include <stdint.h>
@@ -555,9 +555,24 @@ public:
            (uint32_t)sizeof(UniVarPub)  * UVAR_MAX_PUB;
   }
 
-  // Ré-arme la radio après un reset WiFi (le gestionnaire WiFi peut appeler
-  // WiFi.mode(WIFI_OFF), ce qui vide la table des peers et le callback).
-  void rearm() { if (_initialise) _demarrerRadio(); }
+  // Ré-arme la radio après un reset WiFi.
+  //
+  // ⚠️ DÉFAUT CORRIGÉ EN 2.2.1 (constaté le 14/11/2026, BME280 Garage) :
+  //    `rearm()` appelait `_demarrerRadio()`, qui commençait par
+  //        WiFi.mode(WIFI_STA);  WiFi.disconnect(false);
+  //    Il COUPAIT donc l'association que le gestionnaire WiFi venait
+  //    d'établir. Comme les gestionnaires rappellent `rearm()` à chaque
+  //    (re)connexion — précisément parce que leur reset a détruit le stack
+  //    ESP-NOW — cela produisait une boucle sans fin :
+  //        connecté → rearm() → déconnecté → reconnecté → rearm() → …
+  //    La carte devenait injoignable (ni ICMP, ni ARP, ni mDNS).
+  //    Deuxième défaut : `esp_now_add_peer()` sur un peer DÉJÀ présent échoue,
+  //    donc le canal n'était même pas mis à jour.
+  //
+  //    Désormais `rearm()` ré-initialise COMPLÈTEMENT le stack ESP-NOW
+  //    (init + callbacks + peer) SANS jamais toucher au mode WiFi : la
+  //    station est déjà associée, la couper n'a aucun sens.
+  void rearm() { _initialise = false; _demarrerRadio(false); }
 
   // --------------------------------------------------------------------------
   //  APPELÉ PAR LES CALLBACKS RADIO
@@ -629,34 +644,63 @@ public:
 
 private:
   // --------------------------------------------------------------------------
-  bool _demarrerRadio()
+  //  (Ré)initialisation de la radio.
+  //
+  //  @param toucherWifi  true  = premier démarrage : on force le mode station
+  //                             et on coupe une éventuelle association en cours
+  //                             (l'appelant est alors avant `WiFi.begin()`).
+  //                      false = RÉ-ARMEMENT : la station est déjà associée,
+  //                             on ne touche PAS au mode WiFi. C'est le seul
+  //                             comportement acceptable après un reset WiFi
+  //                             déclenché par le gestionnaire (voir `rearm()`).
+  //
+  //  ⚠️ Le stack ESP-NOW doit être RÉ-INITIALISÉ à chaque ré-armement : un
+  //     `WiFi.mode(WIFI_OFF)` (esp_wifi_stop/deinit) détruit peers ET
+  //     callbacks. Se contenter de `esp_now_add_peer()` échoue silencieusement.
+  bool _demarrerRadio(bool toucherWifi = true)
   {
 #if defined(ESP8266) || defined(ESP32)
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect(false);
+    if (toucherWifi) {
+      WiFi.mode(WIFI_STA);
+      WiFi.disconnect(false);
+    }
 #endif
 
 #if defined(ESP8266)
     if (!_initialise) {
-      if (esp_now_init() != 0) return false;
-      esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
-      esp_now_register_recv_cb(_cbRecv8266);
-      esp_now_register_send_cb(_cbSend8266);
+      // esp_now_init() échoue si le stack est DÉJÀ vivant (cas d'un ré-armement
+      // sans reset WiFi préalable) : ce n'est pas une erreur, on garde les
+      // callbacks en place. On ne sort en échec que si le stack reste
+      // inutilisable, c'est-à-dire si le peer ne peut pas être ajouté.
+      if (esp_now_init() == 0) {
+        esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
+        esp_now_register_recv_cb(_cbRecv8266);
+        esp_now_register_send_cb(_cbSend8266);
+      }
       _initialise = true;
     }
-    // Idempotent : esp_now_add_peer renvoie une erreur si déjà présent.
-    esp_now_add_peer((u8*)_BROADCAST, ESP_NOW_ROLE_COMBO, _canal, nullptr, 0);
+    // ⚠️ del_peer AVANT add_peer : sur un peer déjà présent, add_peer échoue
+    //    et le NOUVEAU canal ne serait jamais appliqué.
+    esp_now_del_peer((u8*)_BROADCAST);
+    if (esp_now_add_peer((u8*)_BROADCAST, ESP_NOW_ROLE_COMBO, _canal,
+                         nullptr, 0) != 0) {
+      _initialise = false;          // table inutilisable : réessayer au prochain
+      return false;
+    }
     return true;
 
 #elif defined(ESP32)
     if (!_initialise) {
-      if (esp_now_init() != ESP_OK) return false;
-      #if ESP_IDF_VERSION_MAJOR >= 5
-        esp_now_register_recv_cb(_cbRecv32_idf5);
-      #else
-        esp_now_register_recv_cb(_cbRecv32_idf4);
-      #endif
-      esp_now_register_send_cb(_cbSend32);
+      // Même logique qu'ESP8266 : `esp_now_init()` échoue si le stack est déjà
+      // vivant (ré-armement sans reset WiFi) — ce n'est pas une erreur.
+      if (esp_now_init() == ESP_OK) {
+        #if ESP_IDF_VERSION_MAJOR >= 5
+          esp_now_register_recv_cb(_cbRecv32_idf5);
+        #else
+          esp_now_register_recv_cb(_cbRecv32_idf4);
+        #endif
+        esp_now_register_send_cb(_cbSend32);
+      }
       _initialise = true;
     }
     if (_canal > 0) esp_wifi_set_channel(_canal, WIFI_SECOND_CHAN_NONE);
@@ -666,9 +710,14 @@ private:
     memcpy(peer.peer_addr, _BROADCAST, 6);
     peer.channel = _canal;
     peer.encrypt = false;
-    esp_now_add_peer(&peer);
+    esp_now_del_peer(_BROADCAST);     // idem ESP8266 : sinon canal figé
+    if (esp_now_add_peer(&peer) != ESP_OK) {
+      _initialise = false;
+      return false;
+    }
     return true;
 #else
+    (void)toucherWifi;              // hors ESP : paramètre inutilisé
     return false;   // hors ESP : le codec reste utilisable (tests hôte)
 #endif
   }
