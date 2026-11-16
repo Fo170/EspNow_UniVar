@@ -1,11 +1,12 @@
 // ============================================================================
-//  test_uni_var.cpp — 12 exigences de recette de EspNow_UniVar
+//  test_uni_var.cpp — 13 exigences de recette de EspNow_UniVar
 //
 //  Compilation hôte (aucune carte, aucun flash) :
 //      ./run.sh
 //
-//  Les 12 tests correspondent au §12 du cahier des charges. Un test qui ne
-//  passe pas est un BLOQUANT : la librairie ne doit pas être flashée.
+//  Les 12 premiers tests correspondent au §12 du cahier des charges ; le 13e
+//  couvre le crochet de découverte ajouté en 2.3.0. Un test qui ne passe pas
+//  est un BLOQUANT : la librairie ne doit pas être flashée.
 // ============================================================================
 
 #define UVAR_HOST_TEST      1
@@ -57,6 +58,23 @@ static uint8_t trameFloat(uint8_t* buf, float v, uint16_t id_var = VAR_S,
                           uint8_t id_iot = IOT_A, uint16_t seq = 1)
 {
   return uvarEncode(buf, id_iot, id_var, UVAR_FLOAT32, _Unit_VA_, &v, 4, 1234, 1700000000UL, seq);
+}
+
+// ── 2.3.0 : capture du crochet de découverte ────────────────────────────────
+// `vue.valeur` pointe DANS le tampon radio : on recopie, comme doit le faire
+// toute application qui garde la donnée.
+static UniVarVue g_capture;
+static uint8_t   g_capture_val[8];
+static int       g_vue_ok = 0;
+
+static void captureInconnue(const UniVarVue& vue)
+{
+  g_vue_ok++;
+  g_capture = vue;
+  uint8_t n = vue.len;
+  if (n > sizeof(g_capture_val)) n = sizeof(g_capture_val);
+  memcpy(g_capture_val, vue.valeur, n);
+  g_capture.valeur = g_capture_val;   // re-pointe sur notre copie
 }
 
 // ============================================================================
@@ -427,6 +445,47 @@ int main()
     uint8_t trop[251];
     memset(trop, 'Z', sizeof(trop));
     VERIF(uvarDecode(trop, 251, v) == UVAR_MAGIC_KO);
+  }
+
+  // --------------------------------------------------------------------------
+  titre("13. decouverte : surInconnue recoit la trame non surveillee");
+  {
+    EspNowUniVar env;
+    uint8_t buf[UVAR_TRAME_MAX];
+    const uint8_t n = trameFloat(buf, 7.25f);
+
+    // Sans crochet : comportement 2.2.1 STRICTEMENT inchange.
+    VERIF(env.surInconnue == nullptr);
+    env._traiterTrame(buf, n);
+    VERIF(env.stats().non_surveille == 1);
+    VERIF(g_vue_ok == 0);
+
+    // Avec crochet : la vue est presentee avec TOUS ses champs.
+    env.surInconnue = &captureInconnue;
+    env._traiterTrame(buf, n);
+    VERIF(env.stats().non_surveille == 2);
+    VERIF(g_vue_ok == 1);
+    VERIF(g_capture.id_iot == IOT_A);
+    VERIF(g_capture.id_var == VAR_S);
+    VERIF(g_capture.type == UVAR_FLOAT32);
+    VERIF(g_capture.unit == _Unit_VA_);
+    VERIF(g_capture.len == 4);
+    VERIF(g_capture.seq == 1);
+    float recu = 0.0f;
+    memcpy(&recu, g_capture.valeur, 4);
+    VERIF(recu == 7.25f);
+
+    // Une paire SURVEILLEE ne declenche JAMAIS le crochet.
+    VERIF(env.surveiller(IOT_A, VAR_S) == true);
+    env._traiterTrame(buf, n);
+    VERIF(env.stats().recus == 1);
+    VERIF(g_vue_ok == 1);              // inchange
+
+    // Un autre id_var du meme emetteur, non surveille : le crochet repond.
+    const uint8_t n2 = trameFloat(buf, 1.5f, (uint16_t)(VAR_S + 1));
+    env._traiterTrame(buf, n2);
+    VERIF(g_vue_ok == 2);
+    VERIF(g_capture.id_var == (uint16_t)(VAR_S + 1));
   }
 
   // --------------------------------------------------------------------------

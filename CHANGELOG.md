@@ -3,6 +3,47 @@
 Toutes les dates sont au format AAAA-MM-JJ.
 Le versionnage suit [SemVer](https://semver.org/lang/fr/).
 
+## [2.3.0] - 2026-11-16
+
+### ✨ Ajouté — crochet de DÉCOUVERTE `surInconnue`
+
+**Besoin.** Une trame valide dont la paire `(id_iot, id_var)` n'est pas dans la
+table des slots était **décodée puis jetée** : `_stats.non_surveille`
+s'incrémentait, mais rien ne disait *quelle* variable circulait. Impossible de
+détecter qu'un nœud s'est mis à publier une variable inattendue, ou qu'un
+nouvel émetteur est apparu.
+
+**Ajout** (rétro-compatible, `nullptr` par défaut) :
+
+```cpp
+// membre public de EspNowUniVar
+void (*surInconnue)(const UniVarVue& vue) = nullptr;
+```
+
+Appelé pour chaque trame `UVAR_OK` dont la paire n'est pas surveillée, avec la
+vue complète : `id_iot`, `id_var`, `type`, `unit`, `len`, `valeur`, `seq`,
+`epoch`, `t_fct`.
+
+```cpp
+env.surInconnue = [](const UniVarVue& v) {
+  // tâche WiFi : ne pas bloquer, ne pas allouer, RECOPIER v.valeur
+};
+```
+
+**⚠️ Contrat d'appel.** Le crochet s'exécute dans la **tâche WiFi** (callback
+de réception), pas dans `loop()`. Il ne doit donc :
+
+- ni bloquer, ni allouer ;
+- **ne jamais appeler `surveiller()`** : la table `_slots` est en cours de
+  parcours par la même tâche. L'application marque la découverte et abonne
+  depuis `loop()` ;
+- recopier `vue.valeur` si elle veut garder la donnée (pointeur sur le tampon
+  radio, invalidé au retour).
+
+**Preuve** : recette hôte `test/host/run.sh` → **175 vérifications, 0 échec**,
+dont le nouveau test 13 (crochet non déclenché sur une paire surveillée,
+champs et valeur corrects, `nullptr` = comportement 2.2.1).
+
 ## [2.2.1] - 2026-11-14
 
 ### 🐛 Corrigé — `rearm()` coupait la connexion WiFi qu'il devait préserver

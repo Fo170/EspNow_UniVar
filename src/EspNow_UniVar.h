@@ -28,7 +28,7 @@
 #define ESPNOW_UNIVAR_H
 
 // Version de la librairie (source UNIQUE — agrégée par liste_lib.h)
-#define __ESPNOW_UNIVAR_H_VERSION__ "2.2.1"
+#define __ESPNOW_UNIVAR_H_VERSION__ "2.3.0"
 
 #include <Arduino.h>
 #include <stdint.h>
@@ -436,6 +436,21 @@ public:
   //  RÉCEPTION
   // --------------------------------------------------------------------------
 
+  // ── DÉCOUVERTE (2.3.0) ────────────────────────────────────────────────────
+  // Crochet appelé pour CHAQUE trame valide dont la paire (id_iot, id_var)
+  // n'est PAS dans la table des slots surveillés. Sans lui, une variable
+  // inconnue est décodée puis jetée : `non_surveille` dit combien, jamais
+  // laquelle — impossible de découvrir un émetteur ou un id_var nouveau.
+  //
+  //   • nullptr (défaut) → comportement 2.2.1 strictement inchangé ;
+  //   • `vue` pointe DANS le tampon radio : le recopier si on veut le garder.
+  //
+  // ⚠️ Exécuté dans la tâche WiFi (callback de réception), pas dans loop() :
+  //    ne jamais bloquer, ne pas allouer, et surtout NE PAS appeler
+  //    `surveiller()` ici (il modifie `_slots`, que la même tâche est en train
+  //    de parcourir). Marquer la découverte et abonner depuis loop().
+  void (*surInconnue)(const UniVarVue& vue) = nullptr;
+
   // Déclare une variable à écouter. C'EST L'APPLICATION QUI CONSTRUIT LA TABLE :
   // aucune collision de hachage possible, mémoire déterministe, et les paires
   // non surveillées sont comptées au lieu d'écraser un slot.
@@ -594,7 +609,14 @@ public:
     }
 
     const int i = _trouverSlot(vue.id_iot, vue.id_var);
-    if (i < 0) { _stats.non_surveille++; return; }
+    if (i < 0) {
+      _stats.non_surveille++;
+      // 2.3.0 : DÉCOUVERTE — la trame est déjà décodée ; on la présente à
+      // l'application au lieu de la jeter en silence. Le crochet reste
+      // nullptr par défaut : sans abonné, le comportement est celui de 2.2.1.
+      if (surInconnue) surInconnue(vue);
+      return;
+    }
 
     UniVarSlot& s = _slots[i];
 

@@ -160,6 +160,23 @@ if (env.lire(ID_IOT_CAPTEUR, VAR_ENERGIE, p, &age) && age < 3000) {
 | `lire(id_iot, id_var, T&, &age_ms)` | `false` si jamais reçue **ou si le type ne correspond pas** |
 | `lireTexte(id_iot, id_var, buf, taille, &age_ms)` | chaîne toujours terminée par NUL |
 | `infos(id_iot, id_var, &type, &unité, &age_ms, &perdus)` | métadonnées sans lire la valeur |
+| `surInconnue` (2.3.0) | crochet appelé pour chaque trame **non surveillée** (découverte) |
+
+### Découvrir ce qui circule (2.3.0)
+
+Une trame valide dont la paire `(id_iot, id_var)` n'est pas surveillée était
+décodée puis jetée — `non_surveille` comptait, sans jamais dire *quoi*. Le
+crochet comble ce trou :
+
+```cpp
+env.surInconnue = [](const UniVarVue& v) {
+  // v.id_iot, v.id_var, v.type, v.unit, v.len, v.seq, v.valeur…
+  // tâche WiFi : ne pas bloquer, ne pas allouer, RECOPIER v.valeur,
+  // et NE JAMAIS appeler surveiller() ici (la table est en cours de parcours).
+};
+```
+
+`nullptr` par défaut → comportement identique à la 2.2.1.
 
 **Pas de file d'attente** : la valeur la plus récente gagne. 10 nœuds × 5
 variables × 1 Hz = 50 paquets/s ; une file de 8 déborde en 160 ms — une table de
